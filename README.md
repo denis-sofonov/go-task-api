@@ -6,9 +6,8 @@
 > `lint`.
 
 A task-management API (users, projects, tasks) built with Go, Huma, PostgreSQL
-and sqlc. It is a sibling of the FastAPI and
-[Laravel](https://github.com/denis-sofonov/php-laravel-task-api) implementations
-and the full-stack [Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app) and
+and sqlc. It is a sibling of the FastAPI implementation and the full-stack
+[Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app) and
 [Next.js](https://github.com/denis-sofonov/ts-next-task-app) takes: the same
 domain, different stacks.
 
