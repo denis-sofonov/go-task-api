@@ -1,7 +1,9 @@
 # Reference Backend — Go (1.25+)
 
-> **Status: work in progress.** This README describes the target state. What is
-> already built and what comes next is tracked in [ROADMAP.md](ROADMAP.md).
+> **Status: work in progress.** This README describes the target state; most of
+> it is not built yet. Today the repository contains the project skeleton: a
+> `net/http` server with `GET /health`, plus `make run`, `build`, `test` and
+> `lint`.
 
 A task-management API (users, projects, tasks) built with Go, Huma, PostgreSQL
 and sqlc. It is a sibling of the
