@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -14,8 +15,14 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
 	log.Println("listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
