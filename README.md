@@ -6,8 +6,7 @@
 > `lint`.
 
 A task-management API (users, projects, tasks) built with Go, Huma, PostgreSQL
-and sqlc. It is a sibling of the
-[FastAPI](https://github.com/denis-sofonov/python-fastapi-task-api) and
+and sqlc. It is a sibling of the FastAPI and
 [Laravel](https://github.com/denis-sofonov/php-laravel-task-api) implementations
 and the full-stack [Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app) and
 [Next.js](https://github.com/denis-sofonov/ts-next-task-app) takes: the same
@@ -93,6 +92,9 @@ domain, different stacks.
 - `make` (optional; every target is a plain command)
 
 ## Getting started
+
+> Only `make run`, `build`, `test` and `lint` exist today. The other targets
+> below (`tools`, `migrate`, `seed`, `worker`, `openapi`, `check`) are planned.
 
 ### Local development
 
@@ -239,7 +241,7 @@ Huma serves the schema and interactive docs:
 - Docs UI: `/docs`
 - Raw schema: `/openapi.json`, `/openapi.yaml`
 
-A committed copy lives at [`openapi.json`](openapi.json). Regenerate it without
+A committed copy will live at `openapi.json` (planned). Regenerate it without
 running the server:
 
 ```bash
@@ -282,4 +284,4 @@ deploy/           # nginx configuration
 
 ## License
 
-MIT
+[MIT](LICENSE)
