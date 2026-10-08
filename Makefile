@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: run build test test-race lint
+.PHONY: run build test test-race lint migrate migrate-down migrate-status
 
 run:
 	go run ./cmd/api
@@ -17,3 +17,12 @@ test-race:
 
 lint:
 	golangci-lint run ./...
+
+migrate:
+	go run ./cmd/migrate up
+
+migrate-down:
+	go run ./cmd/migrate down
+
+migrate-status:
+	go run ./cmd/migrate status
