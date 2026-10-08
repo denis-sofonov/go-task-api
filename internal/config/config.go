@@ -15,6 +15,7 @@ type Config struct {
 	HTTPAddr        string        `env:"HTTP_ADDR" envDefault:":8080"`
 	JWTSecretKey    string        `env:"JWT_SECRET_KEY" envDefault:"change-me"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
+	DatabaseURL     string        `env:"DATABASE_URL,required,notEmpty"`
 }
 
 // Load reads the configuration from the environment.

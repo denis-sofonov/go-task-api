@@ -14,6 +14,7 @@ import (
 
 	"github.com/denis-sofonov/go-task-api/internal/config"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
+	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
 )
 
 func main() {
@@ -35,10 +36,26 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	pool, err := postgres.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		status, code := "ok", http.StatusOK
+		if err := pool.Ping(pingCtx); err != nil {
+			log.Error("health: database ping failed", "err", err)
+			status, code = "unavailable", http.StatusServiceUnavailable
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 	})
 
 	srv := &http.Server{
