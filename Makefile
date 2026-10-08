@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: run build test test-race lint migrate migrate-down migrate-status
+.PHONY: run build test test-race lint migrate migrate-down migrate-status tools generate
 
 run:
 	go run ./cmd/api
@@ -26,3 +26,9 @@ migrate-down:
 
 migrate-status:
 	go run ./cmd/migrate status
+
+tools:
+	go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+generate:
+	sqlc generate

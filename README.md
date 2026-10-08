@@ -1,4 +1,4 @@
-# Reference Backend — Go (1.25+)
+# Reference Backend — Go (1.26+)
 
 > **Status: work in progress.** This README describes the target state; most of
 > it is not built yet. Today the repository contains the project skeleton: a
@@ -18,7 +18,7 @@ domain, different stacks.
 
 | Concern            | Choice                                                  |
 | ------------------ | ------------------------------------------------------- |
-| Language / runtime | Go 1.25+, single static binary                          |
+| Language / runtime | Go 1.26+, single static binary                          |
 | HTTP               | `net/http` (Go 1.22+ routing) + [Huma v2](https://huma.rocks) |
 | Database           | PostgreSQL 17, [pgx v5](https://github.com/jackc/pgx) pool |
 | Queries            | [sqlc](https://sqlc.dev) — type-safe Go generated from SQL |
@@ -86,7 +86,7 @@ domain, different stacks.
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
 - Docker (for PostgreSQL and Redis)
 - `make` (optional; every target is a plain command)
 
