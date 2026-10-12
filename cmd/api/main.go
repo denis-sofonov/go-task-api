@@ -12,7 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/denis-sofonov/go-task-api/internal/auth"
 	"github.com/denis-sofonov/go-task-api/internal/config"
+	"github.com/denis-sofonov/go-task-api/internal/db"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
 	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
 )
@@ -42,7 +44,11 @@ func run() error {
 	}
 	defer pool.Close()
 
+	queries := db.New(pool)
+	authH := auth.NewHandler(queries, log)
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/register", authH.Register)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
