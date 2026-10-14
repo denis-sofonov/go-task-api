@@ -45,10 +45,11 @@ func run() error {
 	defer pool.Close()
 
 	queries := db.New(pool)
-	authH := auth.NewHandler(queries, log)
+	authH := auth.NewHandler(queries, log, []byte(cfg.JWTSecretKey), cfg.JWTTTL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/register", authH.Register)
+	mux.HandleFunc("POST /auth/login", authH.Login)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

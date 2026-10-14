@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 
@@ -17,18 +18,31 @@ import (
 )
 
 type Handler struct {
-	q   *db.Queries
-	log *slog.Logger
+	q      *db.Queries
+	log    *slog.Logger
+	secret []byte
+	ttl    time.Duration
 }
 
-func NewHandler(q *db.Queries, log *slog.Logger) *Handler {
-	return &Handler{q: q, log: log}
+func NewHandler(q *db.Queries, log *slog.Logger, secret []byte, ttl time.Duration) *Handler {
+	return &Handler{q: q, log: log, secret: secret, ttl: ttl}
 }
 
 type registerRequest struct {
 	Email    string `json:"email"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type tokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
 }
 
 // userResponse is the public view of a user; it never includes the password hash.
@@ -97,6 +111,49 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Email:     user.Email,
 		Name:      user.Name,
 		CreatedAt: user.CreatedAt,
+	})
+}
+
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	var req loginRequest
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	user, err := h.q.GetUserByEmail(r.Context(), email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusUnauthorized, "invalid email or password")
+		return
+	}
+	if err != nil {
+		h.log.Error("login: get user", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid email or password")
+		return
+	}
+
+	token, err := h.issueToken(user.ID)
+	if err != nil {
+		h.log.Error("login: issue token", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, tokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   int(h.ttl.Seconds()),
 	})
 }
 

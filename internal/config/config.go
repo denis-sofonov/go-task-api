@@ -14,6 +14,7 @@ type Config struct {
 	Env             string        `env:"APP_ENV" envDefault:"development"`
 	HTTPAddr        string        `env:"HTTP_ADDR" envDefault:":8080"`
 	JWTSecretKey    string        `env:"JWT_SECRET_KEY" envDefault:"change-me"`
+	JWTTTL          time.Duration `env:"JWT_TTL" envDefault:"1h"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 	DatabaseURL     string        `env:"DATABASE_URL,required,notEmpty"`
 }
@@ -41,6 +42,9 @@ func (c Config) validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		return errors.New("SHUTDOWN_TIMEOUT must be positive")
+	}
+	if c.JWTTTL <= 0 {
+		return errors.New("JWT_TTL must be positive")
 	}
 	return nil
 }
