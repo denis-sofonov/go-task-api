@@ -20,3 +20,13 @@ sql:
               import: time
               type: Time
               pointer: true
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: pg_catalog.bool
+            nullable: true
+            go_type:
+              type: bool
+              pointer: true

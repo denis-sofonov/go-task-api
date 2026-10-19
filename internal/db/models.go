@@ -10,6 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type Task struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	Title       string
+	Description string
+	Done        bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type User struct {
 	ID              uuid.UUID
 	Email           string
