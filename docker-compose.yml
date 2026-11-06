@@ -15,5 +15,28 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build: .
+    command: ["/app/migrate", "up"]
+    environment:
+      DATABASE_URL: postgres://app:app@db:5432/tasks?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment:
+      APP_ENV: development
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
+      DATABASE_URL: postgres://app:app@db:5432/tasks?sslmode=disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
