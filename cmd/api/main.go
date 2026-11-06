@@ -17,6 +17,7 @@ import (
 	"github.com/denis-sofonov/go-task-api/internal/db"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
 	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
+	"github.com/denis-sofonov/go-task-api/internal/task"
 )
 
 func main() {
@@ -51,6 +52,15 @@ func run() error {
 	mux.HandleFunc("POST /auth/register", authH.Register)
 	mux.HandleFunc("POST /auth/login", authH.Login)
 	mux.Handle("GET /me", authH.RequireAuth(http.HandlerFunc(authH.Me)))
+
+	taskH := task.NewHandler(queries, log)
+	protect := func(h http.HandlerFunc) http.Handler { return authH.RequireAuth(h) }
+	mux.Handle("GET /tasks", protect(taskH.List))
+	mux.Handle("POST /tasks", protect(taskH.Create))
+	mux.Handle("GET /tasks/{id}", protect(taskH.Get))
+	mux.Handle("PATCH /tasks/{id}", protect(taskH.Update))
+	mux.Handle("DELETE /tasks/{id}", protect(taskH.Delete))
+
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
