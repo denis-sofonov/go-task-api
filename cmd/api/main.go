@@ -15,6 +15,7 @@ import (
 	"github.com/denis-sofonov/go-task-api/internal/auth"
 	"github.com/denis-sofonov/go-task-api/internal/config"
 	"github.com/denis-sofonov/go-task-api/internal/db"
+	"github.com/denis-sofonov/go-task-api/internal/platform/kafka"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
 	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
 	"github.com/denis-sofonov/go-task-api/internal/platform/redis"
@@ -55,13 +56,17 @@ func run() error {
 	queries := db.New(pool)
 	authH := auth.NewHandler(queries, log, []byte(cfg.JWTSecretKey), cfg.JWTTTL)
 
-	loginLimitter := auth.NewRateLimiter(rdb, log, 5, time.Minute)
+	loginLimiter := auth.NewRateLimiter(rdb, log, 5, time.Minute)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/register", authH.Register)
-	mux.Handle("POST /auth/login", loginLimitter.Limit(http.HandlerFunc(authH.Login)))
+	mux.Handle("POST /auth/login", loginLimiter.Limit(http.HandlerFunc(authH.Login)))
 	mux.Handle("GET /me", authH.RequireAuth(http.HandlerFunc(authH.Me)))
 
-	taskH := task.NewHandler(queries, log)
+	producer := kafka.NewProducer(cfg.KafkaBrokers, "task-events")
+	defer producer.Close()
+	
+	taskH := task.NewHandler(queries, log, producer)
+	
 	protect := func(h http.HandlerFunc) http.Handler { return authH.RequireAuth(h) }
 	mux.Handle("GET /tasks", protect(taskH.List))
 	mux.Handle("POST /tasks", protect(taskH.Create))

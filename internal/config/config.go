@@ -18,6 +18,7 @@ type Config struct {
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 	DatabaseURL     string        `env:"DATABASE_URL,required,notEmpty"`
 	RedisAddr       string        `env:"REDIS_ADDR" envDefault:"localhost:6379"`
+	KafkaBrokers    []string      `env:"KAFKA_BROKERS" envDefault:"localhost:9092"`
 }
 
 // Load reads the configuration from the environment.

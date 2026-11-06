@@ -16,12 +16,13 @@ import (
 )
 
 type Handler struct {
-	q   *db.Queries
-	log *slog.Logger
+	q      *db.Queries
+	log    *slog.Logger
+	events EventPublisher
 }
 
-func NewHandler(q *db.Queries, log *slog.Logger) *Handler {
-	return &Handler{q: q, log: log}
+func NewHandler(q *db.Queries, log *slog.Logger, events EventPublisher) *Handler {
+	return &Handler{q: q, log: log, events: events}
 }
 
 type createRequest struct {
@@ -103,7 +104,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-
+	h.publishCreated(r.Context(), t)
 	writeJSON(w, http.StatusCreated, toResponse(t))
 }
 
