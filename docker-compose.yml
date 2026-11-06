@@ -74,5 +74,17 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  worker:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://app:app@db:5432/tasks?sslmode=disable
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

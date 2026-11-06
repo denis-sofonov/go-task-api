@@ -64,9 +64,9 @@ func run() error {
 
 	producer := kafka.NewProducer(cfg.KafkaBrokers, "task-events")
 	defer producer.Close()
-	
+
 	taskH := task.NewHandler(queries, log, producer)
-	
+
 	protect := func(h http.HandlerFunc) http.Handler { return authH.RequireAuth(h) }
 	mux.Handle("GET /tasks", protect(taskH.List))
 	mux.Handle("POST /tasks", protect(taskH.Create))

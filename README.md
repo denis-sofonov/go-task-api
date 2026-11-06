@@ -1,9 +1,9 @@
 # Reference Backend — Go (1.26+)
 
-> **Status: work in progress.** This README describes the target state; most of
-> it is not built yet. Today the repository contains the project skeleton: a
-> `net/http` server with `GET /health`, plus `make run`, `build`, `test` and
-> `lint`.
+> **Status: work in progress.** This README describes the target state; not all
+> of it is built yet. Working today: registration, login, `GET /me`, task CRUD,
+> login rate limiting with Redis, `task.created` events in Kafka and a worker
+> that consumes them. Everything runs with `docker compose up -d --build`.
 
 A task-management API (users, projects, tasks) built with Go, Huma, PostgreSQL
 and sqlc. It is a sibling of the FastAPI implementation and the full-stack
@@ -24,9 +24,10 @@ domain, different stacks.
 | Queries            | [sqlc](https://sqlc.dev) — type-safe Go generated from SQL |
 | Migrations         | [goose](https://github.com/pressly/goose) (plain SQL, embedded) |
 | Auth               | Bearer JWT access + revocable, rotating refresh tokens  |
-| Passwords          | Argon2id (`golang.org/x/crypto/argon2`)                 |
-| Background jobs    | [River](https://riverqueue.com) (Postgres-backed queue) |
-| Cache / rate limit | Redis ([go-redis v9](https://github.com/redis/go-redis)) |
+| Passwords          | bcrypt (`golang.org/x/crypto/bcrypt`)                   |
+| Events             | Kafka ([kafka-go](https://github.com/segmentio/kafka-go)) with a consumer worker |
+| Rate limit         | Redis ([go-redis v9](https://github.com/redis/go-redis)) |
+| Containers         | Docker multi-stage build, Docker Compose                |
 | Logging            | `log/slog` (JSON)                                       |
 | Config             | Environment variables ([caarlos0/env](https://github.com/caarlos0/env)) |
 | Tooling            | golangci-lint, `go test` + testcontainers-go, Make      |
@@ -73,10 +74,12 @@ domain, different stacks.
   database. Refresh tokens are stored hashed (SHA-256) and are revocable. Each
   refresh rotates them, so reuse is detectable, and logout and password reset
   revoke them. This matches the sibling implementations.
-- **River over a Redis queue.** River keeps jobs in Postgres. A job can be
-  enqueued in the same transaction as the data change, so "user created but
-  welcome email lost" cannot happen. Redis is still used for the cache and rate
-  limiting, where losing data is harmless.
+- **Kafka for events.** The API publishes `task.created` and a separate worker
+  consumes it, so the request does not wait for background work. Delivery to the
+  worker is at-least-once, so handlers must tolerate duplicates. Publishing
+  happens after the database write, so an event can be lost if Kafka is down; an
+  outbox would close that gap. Redis is used for rate limiting, where losing data
+  is harmless.
 - **Errors are values.** Every layer returns `error`. Domain errors
   (`ErrNotFound`, `ErrForbidden` and so on) are mapped to the HTTP error envelope
   in one place, and unexpected errors become `500` without leaking internals.
@@ -87,45 +90,42 @@ domain, different stacks.
 ## Requirements
 
 - Go 1.26+
-- Docker (for PostgreSQL and Redis)
+- Docker (for PostgreSQL, Redis and Kafka)
 - `make` (optional; every target is a plain command)
 
 ## Getting started
 
-> Only `make run`, `build`, `test` and `lint` exist today. The other targets
-> below (`tools`, `migrate`, `seed`, `worker`, `openapi`, `check`) are planned.
-
-### Local development
-
-```bash
-cp .env.example .env
-docker compose up -d db redis     # PostgreSQL on :5434, Redis on :6379
-make tools                        # install sqlc, goose, golangci-lint
-make migrate                      # apply migrations
-make seed                         # optional: load demo data
-make run                          # go run ./cmd/api
-```
-
-The API is then at `http://localhost:8080` and the docs at `http://localhost:8080/docs`.
-Run the background worker in a second terminal:
-
-```bash
-make worker                       # go run ./cmd/worker
-```
-
-Demo user (after seeding): `demo@example.com` / `password123`.
-
 ### Docker (full stack, one command)
 
 ```bash
-JWT_SECRET_KEY=$(openssl rand -base64 48) \
-  docker compose -f docker-compose.prod.yml up --build
+cp .env.example .env
+docker compose up -d --build
 ```
 
-This starts PostgreSQL, Redis, the migration job, the API, the worker and
-nginx. The API is served at `http://localhost:8081`.
+This starts PostgreSQL, Redis, Kafka, the migration job, the API and the worker.
+The API is served at `http://localhost:8080`.
+
+### Running the Go code on the host
+
+```bash
+cp .env.example .env
+docker compose up -d db redis kafka   # PostgreSQL on :5434, Redis on :6379, Kafka on :9092
+make migrate                          # apply migrations
+make run                              # go run ./cmd/api
+```
+
+Run the worker in a second terminal:
+
+```bash
+make worker                           # go run ./cmd/worker
+```
 
 ## API reference
+
+> **This section describes the planned API.** Today the routes have no `/api/v1`
+> prefix and there are no projects: `POST /auth/register`, `POST /auth/login`,
+> `GET /me`, `GET|POST /tasks`, `GET|PATCH|DELETE /tasks/{id}` and `GET /health`.
+> Errors currently have the shape `{"error": "message"}`.
 
 All endpoints are versioned under `/api/v1` except `/health`. Protected routes
 require `Authorization: Bearer <access_token>`.
@@ -213,10 +213,9 @@ curl -s -X POST localhost:8080/api/v1/projects/$PROJECT_ID/tasks \
 
 ## Operations
 
-- **Background jobs**: emails are dispatched through River and processed by
-  `cmd/worker`.
-- **Scheduled cleanup**: a periodic River job purges expired and revoked
-  refresh tokens every night.
+- **Events**: the API publishes `task.created` to the `task-events` Kafka topic
+  and `cmd/worker` consumes it in the `task-worker` group. The worker only logs
+  events for now.
 - **Cache**: `/api/v1/stats` uses Redis cache-aside with a short TTL.
 - **Logging**: `slog` writes one JSON access line per request with method,
   path, status, duration and a correlated `X-Request-ID`.
@@ -262,17 +261,16 @@ minimum coverage.
 ```
 cmd/
   api/            # HTTP server entrypoint: wiring + graceful shutdown
-  worker/         # River worker entrypoint
+  worker/         # Kafka consumer entrypoint
   seed/           # demo data loader
 internal/
   config/         # env config + validation
-  platform/       # infrastructure: postgres pool, redis, logger
+  platform/       # infrastructure: postgres pool, redis, kafka, logger
   httpx/          # server, middleware (request id, logging, recover, CORS), error envelope
   auth/           # registration, login, JWT, refresh tokens, password hashing
   project/        # project handlers, service, ownership checks
   task/           # task handlers, service
   stats/          # stats endpoint + cache
-  jobs/           # River job definitions (emails, cleanup)
   db/             # sqlc-generated code (do not edit)
   pagination/     # page/size/sort parsing shared by list endpoints
 db/

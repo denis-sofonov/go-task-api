@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: run build test test-race lint migrate migrate-down migrate-status tools generate
+.PHONY: run build test test-race lint migrate migrate-down migrate-status tools generate worker
 
 run:
 	go run ./cmd/api
@@ -32,3 +32,6 @@ tools:
 
 generate:
 	sqlc generate
+
+worker:
+	go run ./cmd/worker
