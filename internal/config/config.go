@@ -17,6 +17,7 @@ type Config struct {
 	JWTTTL          time.Duration `env:"JWT_TTL" envDefault:"1h"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 	DatabaseURL     string        `env:"DATABASE_URL,required,notEmpty"`
+	RedisAddr       string        `env:"REDIS_ADDR" envDefault:"localhost:6379"`
 }
 
 // Load reads the configuration from the environment.

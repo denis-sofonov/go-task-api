@@ -17,6 +17,7 @@ import (
 	"github.com/denis-sofonov/go-task-api/internal/db"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
 	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
+	"github.com/denis-sofonov/go-task-api/internal/platform/redis"
 	"github.com/denis-sofonov/go-task-api/internal/task"
 )
 
@@ -45,12 +46,19 @@ func run() error {
 	}
 	defer pool.Close()
 
+	rdb, err := redis.New(ctx, cfg.RedisAddr)
+	if err != nil {
+		return fmt.Errorf("connect redis: %w", err)
+	}
+	defer rdb.Close()
+
 	queries := db.New(pool)
 	authH := auth.NewHandler(queries, log, []byte(cfg.JWTSecretKey), cfg.JWTTTL)
 
+	loginLimitter := auth.NewRateLimiter(rdb, log, 5, time.Minute)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/register", authH.Register)
-	mux.HandleFunc("POST /auth/login", authH.Login)
+	mux.Handle("POST /auth/login", loginLimitter.Limit(http.HandlerFunc(authH.Login)))
 	mux.Handle("GET /me", authH.RequireAuth(http.HandlerFunc(authH.Me)))
 
 	taskH := task.NewHandler(queries, log)
