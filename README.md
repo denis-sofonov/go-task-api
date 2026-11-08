@@ -145,6 +145,9 @@ scrapes of `/metrics`.
 
 ## Development commands
 
+GitHub Actions runs `go vet ./...` and `make test-race` on pushes to
+`main` and on pull requests.
+
 | Command | Purpose |
 | --- | --- |
 | `make test` | Run `go test` with coverage |
