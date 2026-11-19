@@ -1,296 +1,153 @@
 # Reference Backend — Go (1.26+)
 
-> **Status: work in progress.** This README describes the target state; not all
-> of it is built yet. Working today: registration, login, `GET /me`, task CRUD,
-> login rate limiting with Redis, `task.created` events in Kafka and a worker
-> that consumes them. Everything runs with `docker compose up -d --build`.
+A task-management API for learning Go and its ecosystem. The project covers
+HTTP handlers and middleware, PostgreSQL queries and migrations, Redis rate
+limiting, Kafka events, and monitoring with Prometheus and Grafana.
 
-A task-management API (users, projects, tasks) built with Go, Huma, PostgreSQL
-and sqlc. It is a sibling of the FastAPI implementation and the full-stack
-[Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app) and
-[Next.js](https://github.com/denis-sofonov/ts-next-task-app) takes: the same
-domain, different stacks.
-
-> A user owns projects; a project contains tasks. You can only see and change
-> your own data.
-
-## Tech stack
-
-| Concern            | Choice                                                  |
-| ------------------ | ------------------------------------------------------- |
-| Language / runtime | Go 1.26+, single static binary                          |
-| HTTP               | `net/http` (Go 1.22+ routing) + [Huma v2](https://huma.rocks) |
-| Database           | PostgreSQL 17, [pgx v5](https://github.com/jackc/pgx) pool |
-| Queries            | [sqlc](https://sqlc.dev) — type-safe Go generated from SQL |
-| Migrations         | [goose](https://github.com/pressly/goose) (plain SQL, embedded) |
-| Auth               | Bearer JWT access + revocable, rotating refresh tokens  |
-| Passwords          | bcrypt (`golang.org/x/crypto/bcrypt`)                   |
-| Events             | Kafka ([kafka-go](https://github.com/segmentio/kafka-go)) with a consumer worker |
-| Rate limit         | Redis ([go-redis v9](https://github.com/redis/go-redis)) |
-| Containers         | Docker multi-stage build, Docker Compose                |
-| Logging            | `log/slog` (JSON)                                       |
-| Config             | Environment variables ([caarlos0/env](https://github.com/caarlos0/env)) |
-| Tooling            | golangci-lint, `go test` + testcontainers-go, Make      |
-
-## Features
-
-- Registration, login, `me`, token refresh (with rotation) and logout.
-- Email verification and password reset via short-lived signed tokens.
-- CRUD for projects and tasks nested under a project.
-- Ownership authorization on every resource (`403` for others', `404` if absent).
-- Pagination, case-insensitive search, status filtering and whitelisted sorting.
-- Per-endpoint rate limiting on authentication.
-- One error envelope for every failure.
-- Background email dispatch, Redis caching, JSON logs and a DB-aware health check.
-- OpenAPI 3.1 generated from Go types, interactive docs and an exported `openapi.json`.
-- Graceful shutdown: in-flight requests and jobs finish before the process exits.
-
-## Design decisions & trade-offs
-
-- **Huma on `net/http`, not Fiber or Gin.** Huma is the closest Go analogue of
-  FastAPI: handlers take and return typed structs, and validation plus the
-  OpenAPI schema are derived from those types. It sits on the standard
-  `net/http` router, so all ecosystem middleware works. Fiber is fast but built
-  on `fasthttp`, which is not compatible with `net/http`. For a JSON API backed
-  by Postgres the database dominates latency, so that speed buys nothing here.
-- **sqlc instead of an ORM.** Queries are written as plain SQL and sqlc
-  generates typed Go functions from them at build time. You get compile-time
-  checking with no reflection or query builder at runtime, and the SQL you read
-  is the SQL that runs. The cost is that dynamic queries such as optional
-  filters and sorting take some care. They are handled with a fixed whitelist
-  and `CASE`/`COALESCE` patterns rather than string building.
-- **Package by feature, not by layer.** `internal/auth`, `internal/project` and
-  `internal/task` each hold their own handler, service and storage code. This is
-  the idiomatic Go layout: a package is a unit of meaning, and `internal/` keeps
-  everything private to this module.
-- **Explicit dependency injection in `main`.** There is no DI container. `main`
-  builds the pool, services and handlers and passes them in as arguments. Go
-  favours wiring you can read top to bottom over magic.
-- **Interfaces at the consumer.** A service declares the small interface it
-  needs (for example `Mailer`) instead of depending on a concrete type. Tests
-  then substitute fakes without a mocking framework.
-- **JWT access + revocable refresh tokens (hybrid).** Access tokens are
-  stateless and short-lived (15 min), so authorizing a request never touches the
-  database. Refresh tokens are stored hashed (SHA-256) and are revocable. Each
-  refresh rotates them, so reuse is detectable, and logout and password reset
-  revoke them. This matches the sibling implementations.
-- **Kafka for events.** The API publishes `task.created` and a separate worker
-  consumes it, so the request does not wait for background work. Delivery to the
-  worker is at-least-once, so handlers must tolerate duplicates. Publishing
-  happens after the database write, so an event can be lost if Kafka is down; an
-  outbox would close that gap. Redis is used for rate limiting, where losing data
-  is harmless.
-- **Errors are values.** Every layer returns `error`. Domain errors
-  (`ErrNotFound`, `ErrForbidden` and so on) are mapped to the HTTP error envelope
-  in one place, and unexpected errors become `500` without leaking internals.
-- **Real Postgres in tests.** Integration tests start PostgreSQL with
-  testcontainers-go instead of mocking the database, because sqlc queries are
-  only proven by running them.
-
-## Requirements
-
-- Go 1.26+
-- Docker (for PostgreSQL, Redis and Kafka)
-- `make` (optional; every target is a plain command)
+It shares a domain with the [Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app)
+and [Next.js](https://github.com/denis-sofonov/ts-next-task-app) implementations.
 
 ## Getting started
 
-### Docker (full stack, one command)
+With Docker Compose, start the full stack from the repository root:
 
 ```bash
-cp .env.example .env
 docker compose up -d --build
+curl -fsS http://localhost:8080/health
 ```
 
-This starts PostgreSQL, Redis, Kafka, the migration job, the API and the worker.
-The API is served at `http://localhost:8080`.
+Compose starts PostgreSQL, Redis, Kafka, the migration job, the API, the Kafka
+worker, Prometheus, and Grafana. The API is available at
+[localhost:8080](http://localhost:8080/health). The health endpoint checks
+PostgreSQL and returns `503` if the database is unavailable.
 
-### Running the Go code on the host
+### Running Go on the host
+
+Install Go 1.26+ and Make. Copy the example environment file if you do not
+already have a local `.env`:
 
 ```bash
 cp .env.example .env
-docker compose up -d db redis kafka   # PostgreSQL on :5434, Redis on :6379, Kafka on :9092
-make migrate                          # apply migrations
-make run                              # go run ./cmd/api
+docker compose up -d --wait db redis kafka
+make migrate
+make run
 ```
 
-Run the worker in a second terminal:
-
-```bash
-make worker                           # go run ./cmd/worker
-```
+Run `make worker` in a second terminal to consume Kafka events. Make loads
+configuration from `.env`. PostgreSQL is exposed on port `5434`, Redis on
+`6379`, and Kafka on `9092`.
 
 ## API reference
 
-> **This section describes the planned API.** Today the routes have no `/api/v1`
-> prefix and there are no projects: `POST /auth/register`, `POST /auth/login`,
-> `GET /me`, `GET|POST /tasks`, `GET|PATCH|DELETE /tasks/{id}` and `GET /health`.
-> Errors currently have the shape `{"error": "message"}`.
+Protected routes require `Authorization: Bearer <access_token>`. Tasks belong
+directly to the signed-in user. Looking up, updating, or deleting a task owned
+by another user returns `404`.
 
-All endpoints are versioned under `/api/v1` except `/health`. Protected routes
-require `Authorization: Bearer <access_token>`.
+| Method | Path | Authentication | Purpose |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | Public | Create an account with `email`, `name`, and `password` |
+| POST | `/auth/login` | Public | Exchange `email` and `password` for an access token |
+| GET | `/me` | Bearer token | Get the current user |
+| GET | `/tasks` | Bearer token | List your tasks |
+| POST | `/tasks` | Bearer token | Create a task with `title` and optional `description` |
+| GET | `/tasks/{id}` | Bearer token | Get a task |
+| PATCH | `/tasks/{id}` | Bearer token | Update `title`, `description`, or `done` |
+| DELETE | `/tasks/{id}` | Bearer token | Delete a task |
+| GET | `/health` | Public | Check PostgreSQL connectivity |
+| GET | `/metrics` | Public | Expose Prometheus metrics |
 
-### Authentication
+JSON errors returned by the application handlers have the shape
+`{"error":"message"}`. Login is limited to five requests per minute per IP
+when Redis is available.
 
-| Method | Endpoint                               | Description                     |
-| ------ | -------------------------------------- | ------------------------------- |
-| POST   | `/api/v1/auth/register`                | Create an account               |
-| POST   | `/api/v1/auth/login`                   | Exchange credentials for tokens |
-| GET    | `/api/v1/auth/me`                      | Current user                    |
-| POST   | `/api/v1/auth/refresh`                 | Rotate the token pair           |
-| POST   | `/api/v1/auth/logout`                  | Revoke refresh token(s)         |
-| POST   | `/api/v1/auth/verify-email/request`    | Send a verification email       |
-| POST   | `/api/v1/auth/verify-email/confirm`    | Confirm an email address        |
-| POST   | `/api/v1/auth/password-reset/request`  | Send a reset email              |
-| POST   | `/api/v1/auth/password-reset/confirm`  | Set a new password              |
+### Create your first task
 
-### Projects
-
-| Method | Endpoint                | Description                |
-| ------ | ----------------------- | -------------------------- |
-| GET    | `/api/v1/projects`      | List your projects (paged) |
-| POST   | `/api/v1/projects`      | Create a project           |
-| GET    | `/api/v1/projects/{id}` | Get a project              |
-| PATCH  | `/api/v1/projects/{id}` | Update a project           |
-| DELETE | `/api/v1/projects/{id}` | Delete a project           |
-
-Query parameters: `page`, `size`, `q` (search by name), `sort`
-(`created_at`, `updated_at`, `name`; prefix `-` for descending).
-
-### Tasks
-
-| Method | Endpoint                                   | Description        |
-| ------ | ------------------------------------------ | ------------------ |
-| GET    | `/api/v1/projects/{project_id}/tasks`      | List tasks (paged) |
-| POST   | `/api/v1/projects/{project_id}/tasks`      | Create a task      |
-| GET    | `/api/v1/projects/{project_id}/tasks/{id}` | Get a task         |
-| PATCH  | `/api/v1/projects/{project_id}/tasks/{id}` | Update a task      |
-| DELETE | `/api/v1/projects/{project_id}/tasks/{id}` | Delete a task      |
-
-Query parameters: `page`, `size`, `q` (search by title), `status`
-(`todo`, `in_progress`, `done`), `sort`
-(`created_at`, `updated_at`, `title`, `status`).
-
-### Stats & system
-
-| Method | Endpoint        | Description                       |
-| ------ | --------------- | --------------------------------- |
-| GET    | `/api/v1/stats` | Counts of your projects and tasks |
-| GET    | `/health`       | Liveness + database readiness     |
-
-### Error envelope
-
-Every failure has the same shape:
-
-```json
-{ "error": { "code": "not_found", "message": "Project not found", "details": [] } }
-```
-
-Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
-`validation_error`, `rate_limit_exceeded`, `internal_error`.
-
-### Example
+This example uses `curl` and `jq`:
 
 ```bash
-# Register and log in
-curl -s -X POST localhost:8080/api/v1/auth/register \
-  -H 'content-type: application/json' \
+curl -fsS http://localhost:8080/auth/register \
+  -H 'Content-Type: application/json' \
   -d '{"email":"ada@example.com","name":"Ada","password":"s3cret-pass"}'
 
-TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"email":"ada@example.com","password":"s3cret-pass"}' | jq -r .access_token)
+TOKEN=$(curl -fsS http://localhost:8080/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","password":"s3cret-pass"}' | jq -er '.access_token')
 
-# Create a project, then a task in it
-PROJECT_ID=$(curl -s -X POST localhost:8080/api/v1/projects \
-  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"name":"Website redesign"}' | jq -r .id)
-
-curl -s -X POST localhost:8080/api/v1/projects/$PROJECT_ID/tasks \
-  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+curl -fsS http://localhost:8080/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
   -d '{"title":"Draft the new layout"}'
 ```
 
-## Operations
+## Logs and metrics
 
-- **Events**: the API publishes `task.created` to the `task-events` Kafka topic
-  and `cmd/worker` consumes it in the `task-worker` group. The worker only logs
-  events for now.
-- **Cache**: `/api/v1/stats` uses Redis cache-aside with a short TTL.
-- **Logging**: `slog` writes one JSON access line per request with method,
-  path, status, duration and a correlated `X-Request-ID`.
-- **Health**: `/health` pings the database and returns `503` if it is down.
-- **Shutdown**: on `SIGINT`/`SIGTERM` the server stops accepting connections and
-  waits up to `SHUTDOWN_TIMEOUT` for in-flight requests to finish.
-
-### Local metrics
-
-Run `docker compose up -d --build grafana` to start Grafana, Prometheus and
-the API with its dependencies. Open [Task API in Grafana](http://localhost:3000/d/task-api/task-api)
-and sign in with `admin` / `admin` on the first launch. Grafana loads the
-Prometheus data source and dashboard automatically.
-
-Prometheus scrapes `api:8080/metrics` every 15 seconds. Check the `task-api`
-target at [Prometheus Targets](http://localhost:9090/targets). The dashboard
-shows requests per second and p95 request duration by route. To generate
-sample traffic, run `for i in 1 2 3 4 5; do curl -fsS http://localhost:8080/health; sleep 5; done`.
-If the panels are initially empty, wait for two scrapes after the first request.
-
-### Configuration notes
-
-- **CORS** is denied by default. Set `CORS_ORIGINS` (comma-separated) to allow
-  browser clients.
-- **Rate limiting** keys on the client IP. Behind the bundled nginx, set
-  `TRUST_FORWARDED_FOR=true` so the real client IP is used instead of the proxy's.
-- **Secrets**: in `production` the app refuses to start with the default or a
-  weak (`< 32` char) `JWT_SECRET_KEY`.
-
-## Generated API docs
-
-Huma serves the schema and interactive docs:
-
-- Docs UI: `/docs`
-- Raw schema: `/openapi.json`, `/openapi.yaml`
-
-A committed copy will live at `openapi.json` (planned). Regenerate it without
-running the server:
+The API uses `log/slog` to write JSON to standard output. HTTP access logs
+include `method`, `path`, `route`, `status`, and `duration_ms`:
 
 ```bash
-make openapi
+docker compose logs --tail=20 api
 ```
 
-## Quality checks
+The full stack includes a preconfigured Grafana data source and dashboard.
+To start the monitoring stack with the API and its dependencies, run
+`docker compose up -d --build grafana`.
 
-```bash
-make check      # go vet, golangci-lint, go test -race with coverage
-```
+1. Open [Prometheus Targets](http://localhost:9090/targets) and look for the
+   `task-api` target in state `UP`. Prometheus reads `api:8080/metrics` every
+   15 seconds.
+2. Open the [Task API dashboard](http://localhost:3000/d/task-api/task-api).
+   On the first launch, sign in as `admin` with password `admin`.
+3. Generate sample traffic from your terminal:
 
-CI runs the same gate on every push and pull request. It applies the
-migrations, checks that `sqlc generate` leaves no diff and enforces a 70%
-minimum coverage.
+   ```bash
+   for i in 1 2 3 4 5 6; do
+     curl -fsS http://localhost:8080/health
+     sleep 5
+   done
+   ```
 
-## Project structure
+   Wait for at least two scrapes after the first request. The dashboard shows
+   requests per second and p95 request duration by route. p95 is the estimated
+   time within which 95% of requests finish.
 
-```
-cmd/
-  api/            # HTTP server entrypoint: wiring + graceful shutdown
-  worker/         # Kafka consumer entrypoint
-  seed/           # demo data loader
-internal/
-  config/         # env config + validation
-  platform/       # infrastructure: postgres pool, redis, kafka, logger
-  httpx/          # server, middleware (request id, logging, recover, CORS), error envelope
-  auth/           # registration, login, JWT, refresh tokens, password hashing
-  project/        # project handlers, service, ownership checks
-  task/           # task handlers, service
-  stats/          # stats endpoint + cache
-  db/             # sqlc-generated code (do not edit)
-  pagination/     # page/size/sort parsing shared by list endpoints
-db/
-  migrations/     # goose SQL migrations (embedded into the binary)
-  queries/        # SQL that sqlc turns into Go
-deploy/           # nginx configuration
-```
+The API exports `http_requests_total`, `http_request_duration_seconds`, and
+standard Go runtime and process metrics. The HTTP metrics use route patterns
+such as `GET /tasks/{id}` to group requests for different task IDs. They exclude
+scrapes of `/metrics`.
+
+## How it fits together
+
+- `cmd/api` wires the standard library HTTP server, handlers, and middleware.
+  On `SIGINT` or `SIGTERM`, the server allows in-flight requests up to
+  `SHUTDOWN_TIMEOUT` to finish.
+- `internal/auth` handles registration, bcrypt password hashing, JWTs, and
+  Redis-backed login rate limiting. Access tokens default to one hour.
+- `internal/task` handles CRUD. SQL queries in `db/queries` enforce task
+  ownership, and sqlc generates typed code in `internal/db`. The database
+  uses PostgreSQL with a pgx connection pool.
+- `cmd/migrate` runs Goose with the embedded SQL in `db/migrations`.
+- When a task is created, the API attempts to publish `task.created` to the
+  `task-events` Kafka topic before responding. A failed publish is logged and
+  the task stays saved. `cmd/worker` reads the events and logs their payloads.
+- `deploy/prometheus` holds the scrape configuration. `deploy/grafana` holds
+  the data source provisioning and dashboard.
+
+## Development commands
+
+| Command | Purpose |
+| --- | --- |
+| `make test` | Run `go test` with coverage |
+| `make test-race` | Run `go test` with coverage and the race detector |
+| `make lint` | Run `golangci-lint` when installed |
+| `make migrate-status` | Show applied and pending migrations |
+| `make tools` | Install the version of sqlc pinned in the Makefile |
+| `make generate` | Regenerate Go code from SQL |
+
+## Roadmap
+
+Planned work includes projects and nested tasks, refresh token rotation,
+email verification and password reset, pagination and filtering, and Huma
+with OpenAPI documentation.
 
 ## License
 
