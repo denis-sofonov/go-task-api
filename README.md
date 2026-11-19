@@ -7,6 +7,17 @@ limiting, Kafka events, and monitoring with Prometheus and Grafana.
 It shares a domain with the [Nuxt](https://github.com/denis-sofonov/ts-nuxt-task-app)
 and [Next.js](https://github.com/denis-sofonov/ts-next-task-app) implementations.
 
+## Tech stack
+
+| Area | Technologies |
+| --- | --- |
+| API | Go 1.26, standard library `net/http` and `ServeMux` |
+| Database | PostgreSQL 17, pgx, sqlc, Goose |
+| Authentication | Bearer JWT, bcrypt, Redis for login rate limiting |
+| Events | Apache Kafka, kafka-go |
+| Observability | JSON logs with `log/slog`, Prometheus, Grafana |
+| Local development | Docker Compose, Make, golangci-lint |
+
 ## Getting started
 
 With Docker Compose, start the full stack from the repository root:
