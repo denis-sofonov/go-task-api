@@ -223,6 +223,19 @@ curl -s -X POST localhost:8080/api/v1/projects/$PROJECT_ID/tasks \
 - **Shutdown**: on `SIGINT`/`SIGTERM` the server stops accepting connections and
   waits up to `SHUTDOWN_TIMEOUT` for in-flight requests to finish.
 
+### Local metrics
+
+Run `docker compose up -d --build grafana` to start Grafana, Prometheus and
+the API with its dependencies. Open [Task API in Grafana](http://localhost:3000/d/task-api/task-api)
+and sign in with `admin` / `admin` on the first launch. Grafana loads the
+Prometheus data source and dashboard automatically.
+
+Prometheus scrapes `api:8080/metrics` every 15 seconds. Check the `task-api`
+target at [Prometheus Targets](http://localhost:9090/targets). The dashboard
+shows requests per second and p95 request duration by route. To generate
+sample traffic, run `for i in 1 2 3 4 5; do curl -fsS http://localhost:8080/health; sleep 5; done`.
+If the panels are initially empty, wait for two scrapes after the first request.
+
 ### Configuration notes
 
 - **CORS** is denied by default. Set `CORS_ORIGINS` (comma-separated) to allow
