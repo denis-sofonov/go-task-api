@@ -12,11 +12,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/denis-sofonov/go-task-api/internal/auth"
 	"github.com/denis-sofonov/go-task-api/internal/config"
 	"github.com/denis-sofonov/go-task-api/internal/db"
 	"github.com/denis-sofonov/go-task-api/internal/platform/kafka"
 	"github.com/denis-sofonov/go-task-api/internal/platform/logger"
+	"github.com/denis-sofonov/go-task-api/internal/platform/metrics"
 	"github.com/denis-sofonov/go-task-api/internal/platform/postgres"
 	"github.com/denis-sofonov/go-task-api/internal/platform/redis"
 	"github.com/denis-sofonov/go-task-api/internal/task"
@@ -58,6 +62,7 @@ func run() error {
 
 	loginLimiter := auth.NewRateLimiter(rdb, log, 5, time.Minute)
 	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", promhttp.Handler())
 	mux.HandleFunc("POST /auth/register", authH.Register)
 	mux.Handle("POST /auth/login", loginLimiter.Limit(http.HandlerFunc(authH.Login)))
 	mux.Handle("GET /me", authH.RequireAuth(http.HandlerFunc(authH.Me)))
@@ -89,9 +94,10 @@ func run() error {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 	})
 
+	handler := metrics.InstrumentHTTP(prometheus.DefaultRegisterer, mux)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           logger.AccessLog(log, mux),
+		Handler:           logger.AccessLog(log, handler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
